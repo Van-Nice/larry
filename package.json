@@ -9,7 +9,9 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onView:savedSites"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -18,20 +20,29 @@
         "title": "Hello World"
       },
       {
-        "command": "simpleBrowser.saveSite",
-        "title": "simpleBrowser: Save Site"
+        "command": "larry.saveSite",
+        "title": "Larry: Save Site"
       },
       {
-        "command": "simpleBrowser.removeSavedSite",
-        "title": "Simple Browser: Remove Saved Site"
+        "command": "larry.removeSavedSite",
+        "title": "Larry: Remove Saved Site"
       }
     ],
-    "views": {
-      "explorer": [
+    "viewsContainers": {
+      "activitybar": [
         {
-          "id": "savedSites",
-          "name": "Saved Sites"
+          "id": "larry-container",
+          "title": "Larry",
+          "icon": "icons/larry-dark.svg"
         }
+      ]
+    },
+    "views": {
+    "larry-container": [
+          {
+            "id": "savedSites",
+            "name": "Saved Sites"
+          }
       ]
     }
   },
