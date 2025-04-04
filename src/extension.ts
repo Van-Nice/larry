@@ -1,115 +1,161 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
+/* eslint-disable curly */
 import * as vscode from 'vscode';
 
-// Tree item class for saved sites
-class SavedSiteItem extends vscode.TreeItem {
-	constructor(name: string, url: string) {
-		super(name, vscode.TreeItemCollapsibleState.None);
-		this.tooltip = url;
-		this.description = url.length > 50 ? `${url.slice(0, 50)}...` : url;
-		this.command = {
-			command: 'simpleBrowser.show',
-			title: 'Open in simple browser',
-			arguments: [url]
-		};
-		this.iconPath = new vscode.ThemeIcon('bookmark'); // Built-in bookmark icon
-	}
+interface Site {
+  name: string;
+  url: string;
 }
 
-// Tree data provider for the saved sites view
-class SavedSitesProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
-	private _onDidChangeTreeData: vscode.EventEmitter<vscode.TreeItem | undefined> = new vscode.EventEmitter<vscode.TreeItem | undefined>();
-	readonly onDidChangeTreeData: vscode.Event<vscode.TreeItem | undefined> = this._onDidChangeTreeData.event;
+interface Folder {
+  name: string;
+  children: SavedItem[];
+  isFolder: true;
+}
 
-	constructor(private context: vscode.ExtensionContext) {}
+type SavedItem = Folder | Site;
 
-	getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
-		return element;
-	}
-
-	getChildren(element?: vscode.TreeItem): Thenable<vscode.TreeItem[]> {
-    const savedSites: { name: string; url: string }[] = this.context.globalState.get('savedSites', []);
-    if (element) {
-      return Promise.resolve([]); // No children for items
+class SavedSiteItem extends vscode.TreeItem {
+  constructor(item: SavedItem) {
+    super(item.name, 'children' in item ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
+    if ('url' in item) {
+      this.tooltip = item.url;
+      this.description = item.url.length > 50 ? `${item.url.slice(0, 50)}...` : item.url;
+      this.command = {
+        command: 'simpleBrowser.show',
+        title: 'Open in Simple Browser',
+        arguments: [item.url]
+      };
+      this.iconPath = new vscode.ThemeIcon('bookmark');
+    } else {
+      this.iconPath = new vscode.ThemeIcon('folder');
     }
-    return Promise.resolve(savedSites.map(site => new SavedSiteItem(site.name, site.url)));
+  }
+}
+
+class SavedSitesProvider implements vscode.TreeDataProvider<SavedSiteItem> {
+  private _onDidChangeTreeData: vscode.EventEmitter<SavedSiteItem | undefined> = new vscode.EventEmitter<SavedSiteItem | undefined>();
+  readonly onDidChangeTreeData: vscode.Event<SavedSiteItem | undefined> = this._onDidChangeTreeData.event;
+
+  constructor(private context: vscode.ExtensionContext) {}
+
+  getTreeItem(element: SavedSiteItem): vscode.TreeItem {
+    return element;
   }
 
-	refresh(): void {
-		this._onDidChangeTreeData.fire(undefined);
-	}
+  getChildren(element?: SavedSiteItem): Thenable<SavedSiteItem[]> {
+    const savedSites: SavedItem[] = this.context.globalState.get('savedSites', []);
+    if (!element) {
+      // Root level: return top-level folders and sites
+      return Promise.resolve(savedSites.map(item => new SavedSiteItem(item)));
+    }
+    // Child level: return children of a folder
+    if ('children' in element) {
+      const folder = element as Folder;
+      return Promise.resolve(folder.children.map(item => new SavedSiteItem(item)));
+    }
+    return Promise.resolve([]);
+  }
+
+  refresh(): void {
+    this._onDidChangeTreeData.fire(undefined);
+  }
 }
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
-	// Initialize saved sites from global state
-	const savedSitesKey = 'savedSites';
-	let savedSites: { name: string; url: string}[] = context.globalState.get(savedSitesKey, []);
+  const savedSitesKey = 'savedSites';
+  let savedSites: SavedItem[] = context.globalState.get(savedSitesKey, []);
 
-	// Register the tree data provider for the Saved Sites view
-	const savedSitesProvider:SavedSitesProvider = new SavedSitesProvider(context);
-	vscode.window.registerTreeDataProvider('savedSites', savedSitesProvider);
+  const savedSitesProvider = new SavedSitesProvider(context);
+  vscode.window.registerTreeDataProvider('savedSites', savedSitesProvider);
 
-	// Command to save a site
-	context.subscriptions.push(
-		vscode.commands.registerCommand('larry.saveSite', async () => {
-			const name = await vscode.window.showInputBox({ prompt: 'Enter a name for the site' });
-			if (!name) { return; }
+  context.subscriptions.push(
+    vscode.commands.registerCommand('larry.saveSite', async () => {
+      const name = await vscode.window.showInputBox({ prompt: 'Enter a name for the site' });
+      if (!name) return;
 
-			const url = await vscode.window.showInputBox({ prompt: 'Enter the URL (e.g, https://example.com)' });
-			if (!url) { return; }
+      const url = await vscode.window.showInputBox({ prompt: 'Enter the URL (e.g., https://example.com)' });
+      if (!url) return;
 
-			// Basic URL validation
       if (!url.startsWith('http://') && !url.startsWith('https://')) {
         vscode.window.showErrorMessage('Please enter a valid URL starting with http:// or https://');
         return;
       }
 
-			savedSites.push({ name, url });
-			await context.globalState.update(savedSitesKey, savedSites);
-			savedSitesProvider.refresh();
-			vscode.window.showInformationMessage(`Saved "${name}"`);
-		})
-	);
+      const folder = await vscode.window.showQuickPick(
+        ['New Folder', ...savedSites.filter(item => 'isFolder' in item && item.isFolder).map(item => item.name)],
+        { placeHolder: 'Save in a folder (or create new)' }
+      );
+      if (!folder) return;
 
-	// Command to remove a saved site
-	context.subscriptions.push(
-		vscode.commands.registerCommand('larry.removeSavedSite', async () => {
-			if (savedSites.length === 0) {
-				vscode.window.showInformationMessage('No saved sites to remove');
-				return;
-			}
+      const newSite: Site = { name, url };
+      if (folder === 'New Folder') {
+        const folderName = await vscode.window.showInputBox({ prompt: 'Enter folder name' });
+        if (!folderName) return;
+        savedSites.push({ name: folderName, isFolder: true, children: [newSite] });
+      } else {
+        const targetFolder = savedSites.find((item): item is Folder => 'children' in item && item.name === folder);
+        if (targetFolder) {
+          targetFolder.children.push(newSite);
+        } else {
+          vscode.window.showErrorMessage('Selected folder not found.');
+        }
+      }
 
-			const pick = await vscode.window.showQuickPick(
-				savedSites.map(site => site.name),
-				{ placeHolder: 'Select a site to remove' }
-			);
-			if (!pick) { return; }
+      await context.globalState.update(savedSitesKey, savedSites);
+      savedSitesProvider.refresh();
+      vscode.window.showInformationMessage(`Saved "${name}"`);
+    })
+  );
 
-			savedSites = savedSites.filter(site => site.name !== pick);
-			await context.globalState.update(savedSitesKey, savedSites);
-			savedSitesProvider.refresh();
-			vscode.window.showInformationMessage(`Removed "${pick}"`);
-		})
-	);
+  context.subscriptions.push(
+    vscode.commands.registerCommand('larry.removeSavedSite', async () => {
+      let savedSites: SavedItem[] = context.globalState.get(savedSitesKey, []);
+      if (savedSites.length === 0) {
+        vscode.window.showInformationMessage('No saved sites to remove');
+        return;
+      }
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "larry" is now active!');
+      const allItems: string[] = [];
+      savedSites.forEach(item => {
+        if ('children' in item) {
+          allItems.push(`Folder: ${item.name}`);
+          item.children.forEach(child => allItems.push(`  ${child.name}`));
+        } else {
+          allItems.push(item.name);
+        }
+      });
 
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	const disposable = vscode.commands.registerCommand('larry.helloWorld', () => {
-		// The code you place here will be executed every time your command is executed
-		// Display a message box to the user
-		vscode.window.showInformationMessage('Hello World from Larry!');
-	});
+      const pick = await vscode.window.showQuickPick(allItems, { placeHolder: 'Select a site or folder to remove' });
+      if (!pick) return;
 
-	context.subscriptions.push(disposable);
+      if (pick.startsWith('Folder: ')) {
+        const folderName = pick.replace('Folder: ', '');
+        const updatedSites = savedSites.filter(item => {
+          return ('children' in item && item.name !== folderName) || !('children' in item);
+        });
+      } else {
+        const siteName = pick.trim();
+        savedSites = savedSites.map(item => {
+          if ('children' in item) {
+            item.children = item.children.filter(child => child.name !== siteName);
+          }
+          return item;
+        }).filter(item => ('children' in item && Array.isArray(item.children) && item.children.length > 0) || !('children' in item));
+      }
+
+      await context.globalState.update(savedSitesKey, savedSites);
+      savedSitesProvider.refresh();
+      vscode.window.showInformationMessage(`Removed "${pick}"`);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('larry.helloWorld', () => {
+      vscode.window.showInformationMessage('Hello World from Larry!');
+    })
+  );
+
+  console.log('Congratulations, your extension "larry" is now active!');
 }
 
-// This method is called when your extension is deactivated
 export function deactivate() {}

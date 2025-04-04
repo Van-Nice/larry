@@ -36,16 +36,20 @@ __export(extension_exports, {
 module.exports = __toCommonJS(extension_exports);
 var vscode = __toESM(require("vscode"));
 var SavedSiteItem = class extends vscode.TreeItem {
-  constructor(name, url) {
-    super(name, vscode.TreeItemCollapsibleState.None);
-    this.tooltip = url;
-    this.description = url.length > 50 ? `${url.slice(0, 50)}...` : url;
-    this.command = {
-      command: "simpleBrowser.show",
-      title: "Open in simple browser",
-      arguments: [url]
-    };
-    this.iconPath = new vscode.ThemeIcon("bookmark");
+  constructor(item) {
+    super(item.name, "children" in item ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
+    if ("url" in item) {
+      this.tooltip = item.url;
+      this.description = item.url.length > 50 ? `${item.url.slice(0, 50)}...` : item.url;
+      this.command = {
+        command: "simpleBrowser.show",
+        title: "Open in Simple Browser",
+        arguments: [item.url]
+      };
+      this.iconPath = new vscode.ThemeIcon("bookmark");
+    } else {
+      this.iconPath = new vscode.ThemeIcon("folder");
+    }
   }
 };
 var SavedSitesProvider = class {
@@ -59,10 +63,14 @@ var SavedSitesProvider = class {
   }
   getChildren(element) {
     const savedSites = this.context.globalState.get("savedSites", []);
-    if (element) {
-      return Promise.resolve([]);
+    if (!element) {
+      return Promise.resolve(savedSites.map((item) => new SavedSiteItem(item)));
     }
-    return Promise.resolve(savedSites.map((site) => new SavedSiteItem(site.name, site.url)));
+    if ("children" in element) {
+      const folder = element;
+      return Promise.resolve(folder.children.map((item) => new SavedSiteItem(item)));
+    }
+    return Promise.resolve([]);
   }
   refresh() {
     this._onDidChangeTreeData.fire(void 0);
@@ -76,18 +84,31 @@ function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand("larry.saveSite", async () => {
       const name = await vscode.window.showInputBox({ prompt: "Enter a name for the site" });
-      if (!name) {
-        return;
-      }
-      const url = await vscode.window.showInputBox({ prompt: "Enter the URL (e.g, https://example.com)" });
-      if (!url) {
-        return;
-      }
+      if (!name) return;
+      const url = await vscode.window.showInputBox({ prompt: "Enter the URL (e.g., https://example.com)" });
+      if (!url) return;
       if (!url.startsWith("http://") && !url.startsWith("https://")) {
         vscode.window.showErrorMessage("Please enter a valid URL starting with http:// or https://");
         return;
       }
-      savedSites.push({ name, url });
+      const folder = await vscode.window.showQuickPick(
+        ["New Folder", ...savedSites.filter((item) => "isFolder" in item && item.isFolder).map((item) => item.name)],
+        { placeHolder: "Save in a folder (or create new)" }
+      );
+      if (!folder) return;
+      const newSite = { name, url };
+      if (folder === "New Folder") {
+        const folderName = await vscode.window.showInputBox({ prompt: "Enter folder name" });
+        if (!folderName) return;
+        savedSites.push({ name: folderName, isFolder: true, children: [newSite] });
+      } else {
+        const targetFolder = savedSites.find((item) => "children" in item && item.name === folder);
+        if (targetFolder) {
+          targetFolder.children.push(newSite);
+        } else {
+          vscode.window.showErrorMessage("Selected folder not found.");
+        }
+      }
       await context.globalState.update(savedSitesKey, savedSites);
       savedSitesProvider.refresh();
       vscode.window.showInformationMessage(`Saved "${name}"`);
@@ -95,28 +116,47 @@ function activate(context) {
   );
   context.subscriptions.push(
     vscode.commands.registerCommand("larry.removeSavedSite", async () => {
-      if (savedSites.length === 0) {
+      let savedSites2 = context.globalState.get(savedSitesKey, []);
+      if (savedSites2.length === 0) {
         vscode.window.showInformationMessage("No saved sites to remove");
         return;
       }
-      const pick = await vscode.window.showQuickPick(
-        savedSites.map((site) => site.name),
-        { placeHolder: "Select a site to remove" }
-      );
-      if (!pick) {
-        return;
+      const allItems = [];
+      savedSites2.forEach((item) => {
+        if ("children" in item) {
+          allItems.push(`Folder: ${item.name}`);
+          item.children.forEach((child) => allItems.push(`  ${child.name}`));
+        } else {
+          allItems.push(item.name);
+        }
+      });
+      const pick = await vscode.window.showQuickPick(allItems, { placeHolder: "Select a site or folder to remove" });
+      if (!pick) return;
+      if (pick.startsWith("Folder: ")) {
+        const folderName = pick.replace("Folder: ", "");
+        const updatedSites = savedSites2.filter((item) => {
+          return "children" in item && item.name !== folderName || !("children" in item);
+        });
+      } else {
+        const siteName = pick.trim();
+        savedSites2 = savedSites2.map((item) => {
+          if ("children" in item) {
+            item.children = item.children.filter((child) => child.name !== siteName);
+          }
+          return item;
+        }).filter((item) => "children" in item && Array.isArray(item.children) && item.children.length > 0 || !("children" in item));
       }
-      savedSites = savedSites.filter((site) => site.name !== pick);
-      await context.globalState.update(savedSitesKey, savedSites);
+      await context.globalState.update(savedSitesKey, savedSites2);
       savedSitesProvider.refresh();
       vscode.window.showInformationMessage(`Removed "${pick}"`);
     })
   );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("larry.helloWorld", () => {
+      vscode.window.showInformationMessage("Hello World from Larry!");
+    })
+  );
   console.log('Congratulations, your extension "larry" is now active!');
-  const disposable = vscode.commands.registerCommand("larry.helloWorld", () => {
-    vscode.window.showInformationMessage("Hello World from Larry!");
-  });
-  context.subscriptions.push(disposable);
 }
 function deactivate() {
 }
