@@ -226,9 +226,33 @@ export function activate(context: vscode.ExtensionContext) {
         webviewPanels.delete(site.id);
       });
 
+      // Get timeout from configuration
+      const timeout = vscode.workspace
+        .getConfiguration("larry")
+        .get("webviewTimeout", 5000);
+
       // Set webview content - load the URL
-      panel.webview.html = getWebviewContent(site.url, site.name);
+      panel.webview.html = getWebviewContent(site.url, site.name, timeout);
+
+      panel.webview.onDidReceiveMessage((message) => {
+        if (message.command === "openExternally") {
+          openInBrowser(site.url);
+          panel.dispose(); // Close the panel
+        }
+      });
     })
+  );
+
+  // Register open in browser command
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "larry.openInBrowser",
+      (item: SavedSiteItem) => {
+        if (!isFolder(item.item)) {
+          openInBrowser(item.item.url);
+        }
+      }
+    )
   );
 
   // Register rename command
@@ -328,8 +352,26 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {}
 
+// Helper function to open a URL in the default browser
+function openInBrowser(url: string): void {
+  vscode.env
+    .openExternal(vscode.Uri.parse(url))
+    .then((success) => {
+      if (!success) {
+        vscode.window.showErrorMessage(`Failed to open ${url} in browser`);
+      }
+    })
+    .then(undefined, (error: Error) => {
+      vscode.window.showErrorMessage(`Error opening URL: ${error.message}`);
+    });
+}
+
 // Helper function to generate webview HTML
-function getWebviewContent(url: string, title: string): string {
+function getWebviewContent(
+  url: string,
+  title: string,
+  timeout: number
+): string {
   return `
     <!DOCTYPE html>
     <html lang="en">
@@ -338,21 +380,87 @@ function getWebviewContent(url: string, title: string): string {
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>${title}</title>
       <style>
-        body, html {
-          margin: 0;
-          padding: 0;
-          height: 100%;
-          overflow: hidden;
-        }
-        iframe {
-          width: 100%;
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif; }
+        iframe { width: 100%; height: 100vh; border: none; }
+        .error { 
+          display: none; 
+          padding: 2rem; 
+          text-align: center; 
+          background-color: var(--vscode-editor-background);
+          color: var(--vscode-editor-foreground);
           height: 100vh;
+          box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+        }
+        .error h2 { margin-top: 0; }
+        .error p { margin-bottom: 1.5rem; }
+        button {
+          background-color: var(--vscode-button-background);
+          color: var(--vscode-button-foreground);
           border: none;
+          padding: 0.5rem 1rem;
+          border-radius: 2px;
+          cursor: pointer;
+          font-size: 14px;
+        }
+        button:hover {
+          background-color: var(--vscode-button-hoverBackground);
+        }
+        .loading {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          color: var(--vscode-editor-foreground);
+        }
+        .loading::after {
+          content: "";
+          width: 30px;
+          height: 30px;
+          border: 3px solid var(--vscode-editor-foreground);
+          border-top-color: transparent;
+          border-radius: 50%;
+          animation: loading 1s linear infinite;
+        }
+        @keyframes loading {
+          to { transform: rotate(360deg); }
         }
       </style>
     </head>
     <body>
-      <iframe src="${url}" sandbox="allow-scripts allow-same-origin allow-forms" allow="autoplay; encrypted-media; fullscreen"></iframe>
+      <div id="loading" class="loading"></div>
+      <div id="error" class="error">
+        <h2>Couldn't load the site</h2>
+        <p>The site "${title}" couldn't be loaded in the webview.</p>
+        <button onclick="openExternally()">Open in browser</button>
+      </div>
+      <iframe id="siteFrame" src="${url}" sandbox="allow-scripts allow-same-origin allow-forms" allow="autoplay; encrypted-media; fullscreen"></iframe>
+
+      <script>
+        const iframe = document.getElementById('siteFrame');
+        const errorDiv = document.getElementById('error');
+        const loadingDiv = document.getElementById('loading');
+        
+        // Hide loading indicator when iframe loads
+        iframe.onload = () => {
+          loadingDiv.style.display = 'none';
+        };
+        
+        // Show error after timeout
+        const timeout = setTimeout(() => {
+          iframe.style.display = 'none';
+          loadingDiv.style.display = 'none';
+          errorDiv.style.display = 'flex';
+        }, ${timeout}); // Use configured timeout
+
+        function openExternally() {
+          const vscode = acquireVsCodeApi();
+          vscode.postMessage({ command: 'openExternally' });
+        }
+      </script>
     </body>
     </html>
   `;
