@@ -213,11 +213,11 @@ export function activate(context: vscode.ExtensionContext) {
       // Store reference to panel
       webviewPanels.set(site.id, panel);
 
-      // Set panel icon using larry.svg which already exists
+      // Set panel icon using larry-light.svg which already exists
       const iconPath = path.join(
         extensionContext.extensionPath,
         "icons",
-        "larry.svg"
+        "larry-light.svg"
       );
       panel.iconPath = vscode.Uri.file(iconPath);
 
