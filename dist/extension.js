@@ -35,130 +35,273 @@ __export(extension_exports, {
 });
 module.exports = __toCommonJS(extension_exports);
 var vscode = __toESM(require("vscode"));
+var path = __toESM(require("path"));
+var savedSites = [];
+var savedSitesKey = "larry.savedSites";
+var extensionContext;
+var savedSitesProvider;
+var webviewPanels = /* @__PURE__ */ new Map();
 var SavedSiteItem = class extends vscode.TreeItem {
   constructor(item) {
-    super(item.name, "children" in item ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
-    if ("url" in item) {
-      this.tooltip = item.url;
-      this.description = item.url.length > 50 ? `${item.url.slice(0, 50)}...` : item.url;
-      this.command = {
-        command: "simpleBrowser.show",
-        title: "Open in Simple Browser",
-        arguments: [item.url]
-      };
-      this.iconPath = new vscode.ThemeIcon("bookmark");
-    } else {
+    super(
+      item.name,
+      isFolder(item) ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
+    );
+    this.item = item;
+    this.id = item.id;
+    this.contextValue = isFolder(item) ? "folder" : "site";
+    if (isFolder(item)) {
       this.iconPath = new vscode.ThemeIcon("folder");
+    } else {
+      this.iconPath = new vscode.ThemeIcon("globe");
+      this.command = {
+        command: "larry.openSite",
+        title: "Open Site",
+        arguments: [item]
+      };
+      this.tooltip = item.url;
     }
   }
 };
 var SavedSitesProvider = class {
-  constructor(context) {
-    this.context = context;
-  }
   _onDidChangeTreeData = new vscode.EventEmitter();
   onDidChangeTreeData = this._onDidChangeTreeData.event;
   getTreeItem(element) {
     return element;
   }
   getChildren(element) {
-    const savedSites = this.context.globalState.get("savedSites", []);
-    if (!element) {
-      return Promise.resolve(savedSites.map((item) => new SavedSiteItem(item)));
+    if (!element) return savedSites.map((item) => new SavedSiteItem(item));
+    if (element instanceof SavedSiteItem && isFolder(element.item)) {
+      return element.item.children.map((item) => new SavedSiteItem(item));
     }
-    if ("children" in element) {
-      const folder = element;
-      return Promise.resolve(folder.children.map((item) => new SavedSiteItem(item)));
-    }
-    return Promise.resolve([]);
+    return [];
   }
   refresh() {
     this._onDidChangeTreeData.fire(void 0);
   }
 };
-function activate(context) {
-  const savedSitesKey = "savedSites";
-  let savedSites = context.globalState.get(savedSitesKey, []);
-  const savedSitesProvider = new SavedSitesProvider(context);
-  vscode.window.registerTreeDataProvider("savedSites", savedSitesProvider);
-  context.subscriptions.push(
-    vscode.commands.registerCommand("larry.saveSite", async () => {
-      const name = await vscode.window.showInputBox({ prompt: "Enter a name for the site" });
-      if (!name) return;
-      const url = await vscode.window.showInputBox({ prompt: "Enter the URL (e.g., https://example.com)" });
-      if (!url) return;
-      if (!url.startsWith("http://") && !url.startsWith("https://")) {
-        vscode.window.showErrorMessage("Please enter a valid URL starting with http:// or https://");
-        return;
-      }
-      const folder = await vscode.window.showQuickPick(
-        ["New Folder", ...savedSites.filter((item) => "isFolder" in item && item.isFolder).map((item) => item.name)],
-        { placeHolder: "Save in a folder (or create new)" }
+var SavedSitesDragAndDropController = class {
+  dropMimeTypes = ["application/vnd.larry.saved-item"];
+  dragMimeTypes = ["application/vnd.larry.saved-item"];
+  mimeType = "application/vnd.larry.saved-item";
+  handleDrag(source, treeDataTransfer) {
+    const draggedItem = source[0];
+    if (draggedItem instanceof SavedSiteItem) {
+      treeDataTransfer.set(
+        this.mimeType,
+        new vscode.DataTransferItem(draggedItem.item.id)
       );
-      if (!folder) return;
-      const newSite = { name, url };
-      if (folder === "New Folder") {
-        const folderName = await vscode.window.showInputBox({ prompt: "Enter folder name" });
-        if (!folderName) return;
-        savedSites.push({ name: folderName, isFolder: true, children: [newSite] });
-      } else {
-        const targetFolder = savedSites.find((item) => "children" in item && item.name === folder);
-        if (targetFolder) {
-          targetFolder.children.push(newSite);
-        } else {
-          vscode.window.showErrorMessage("Selected folder not found.");
-        }
+    }
+  }
+  async handleDrop(target, treeDataTransfer) {
+    const draggedId = treeDataTransfer.get(this.mimeType)?.value;
+    if (!draggedId) return;
+    const draggedItem = findItemById(savedSites, draggedId);
+    if (!draggedItem) return;
+    if (isFolder(draggedItem) && target instanceof SavedSiteItem && isFolder(target.item) && isDescendant(draggedItem, target.item.id)) {
+      vscode.window.showErrorMessage(
+        "Cannot drop a folder into itself or its subfolders."
+      );
+      return;
+    }
+    removeItemFromStructure(savedSites, draggedId);
+    if (target instanceof SavedSiteItem && isFolder(target.item)) {
+      target.item.children.push(draggedItem);
+    } else {
+      savedSites.push(draggedItem);
+    }
+    await extensionContext.globalState.update(savedSitesKey, savedSites);
+    savedSitesProvider.refresh();
+  }
+};
+function findItemById(items, id) {
+  for (const item of items) {
+    if (item.id === id) return item;
+    if (isFolder(item)) {
+      const found = findItemById(item.children, id);
+      if (found) return found;
+    }
+  }
+  return void 0;
+}
+function isFolder(item) {
+  return "children" in item && item.isFolder === true;
+}
+function removeItemFromStructure(items, id) {
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].id === id) {
+      items.splice(i, 1);
+      return true;
+    }
+    if (isFolder(items[i])) {
+      const folder = items[i];
+      if (removeItemFromStructure(folder.children, id)) {
+        return true;
       }
-      await context.globalState.update(savedSitesKey, savedSites);
-      savedSitesProvider.refresh();
-      vscode.window.showInformationMessage(`Saved "${name}"`);
-    })
-  );
+    }
+  }
+  return false;
+}
+function isDescendant(parent, targetId) {
+  if (parent.id === targetId) return true;
+  for (const child of parent.children) {
+    if (isFolder(child) && isDescendant(child, targetId)) return true;
+  }
+  return false;
+}
+function addItemToFolder(folder, item) {
+  if (isFolder(folder)) {
+    folder.children.push(item);
+  }
+}
+function activate(context) {
+  extensionContext = context;
+  savedSites = context.globalState.get(savedSitesKey, []);
+  savedSitesProvider = new SavedSitesProvider();
+  const treeView = vscode.window.createTreeView("savedSites", {
+    treeDataProvider: savedSitesProvider,
+    dragAndDropController: new SavedSitesDragAndDropController(),
+    canSelectMany: false
+  });
   context.subscriptions.push(
-    vscode.commands.registerCommand("larry.removeSavedSite", async () => {
-      let savedSites2 = context.globalState.get(savedSitesKey, []);
-      if (savedSites2.length === 0) {
-        vscode.window.showInformationMessage("No saved sites to remove");
+    vscode.commands.registerCommand("larry.openSite", (site) => {
+      const existingPanel = webviewPanels.get(site.id);
+      if (existingPanel) {
+        existingPanel.reveal();
         return;
       }
-      const allItems = [];
-      savedSites2.forEach((item) => {
-        if ("children" in item) {
-          allItems.push(`Folder: ${item.name}`);
-          item.children.forEach((child) => allItems.push(`  ${child.name}`));
-        } else {
-          allItems.push(item.name);
+      const panel = vscode.window.createWebviewPanel(
+        "larrySiteViewer",
+        site.name,
+        vscode.ViewColumn.One,
+        {
+          enableScripts: true,
+          retainContextWhenHidden: true,
+          enableFindWidget: true
         }
+      );
+      webviewPanels.set(site.id, panel);
+      const iconPath = path.join(
+        extensionContext.extensionPath,
+        "icons",
+        "larry.svg"
+      );
+      panel.iconPath = vscode.Uri.file(iconPath);
+      panel.onDidDispose(() => {
+        webviewPanels.delete(site.id);
       });
-      const pick = await vscode.window.showQuickPick(allItems, { placeHolder: "Select a site or folder to remove" });
-      if (!pick) return;
-      if (pick.startsWith("Folder: ")) {
-        const folderName = pick.replace("Folder: ", "");
-        const updatedSites = savedSites2.filter((item) => {
-          return "children" in item && item.name !== folderName || !("children" in item);
-        });
-      } else {
-        const siteName = pick.trim();
-        savedSites2 = savedSites2.map((item) => {
-          if ("children" in item) {
-            item.children = item.children.filter((child) => child.name !== siteName);
-          }
-          return item;
-        }).filter((item) => "children" in item && Array.isArray(item.children) && item.children.length > 0 || !("children" in item));
-      }
-      await context.globalState.update(savedSitesKey, savedSites2);
-      savedSitesProvider.refresh();
-      vscode.window.showInformationMessage(`Removed "${pick}"`);
+      panel.webview.html = getWebviewContent(site.url, site.name);
     })
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand("larry.helloWorld", () => {
-      vscode.window.showInformationMessage("Hello World from Larry!");
-    })
+    vscode.commands.registerCommand(
+      "larry.rename",
+      async (item) => {
+        const newName = await vscode.window.showInputBox({
+          prompt: "Enter new name",
+          value: item.item.name
+        });
+        if (newName && item.id) {
+          const targetItem = findItemById(savedSites, item.id);
+          if (targetItem) {
+            targetItem.name = newName;
+            context.globalState.update(savedSitesKey, savedSites);
+            savedSitesProvider.refresh();
+          }
+        }
+      }
+    )
   );
-  console.log('Congratulations, your extension "larry" is now active!');
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "larry.removeSavedSite",
+      async (item) => {
+        if (item.id && removeItemFromStructure(savedSites, item.id)) {
+          context.globalState.update(savedSitesKey, savedSites);
+          savedSitesProvider.refresh();
+        }
+      }
+    )
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "larry.addSite",
+      async (folder) => {
+        const name = await vscode.window.showInputBox({
+          prompt: "Enter site name"
+        });
+        const url = await vscode.window.showInputBox({
+          prompt: "Enter site URL"
+        });
+        if (name && url) {
+          const newSite = { name, url, id: Date.now().toString() };
+          if (folder && isFolder(folder.item)) {
+            addItemToFolder(folder.item, newSite);
+          } else {
+            savedSites.push(newSite);
+          }
+          context.globalState.update(savedSitesKey, savedSites);
+          savedSitesProvider.refresh();
+        }
+      }
+    )
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "larry.addFolder",
+      async (parentFolder) => {
+        const nameInput = await vscode.window.showInputBox({
+          prompt: "Enter folder name"
+        });
+        if (nameInput) {
+          const name = nameInput;
+          const newFolder = {
+            name,
+            children: [],
+            isFolder: true,
+            id: Date.now().toString()
+          };
+          if (parentFolder && isFolder(parentFolder.item)) {
+            addItemToFolder(parentFolder.item, newFolder);
+          } else {
+            savedSites.push(newFolder);
+          }
+          context.globalState.update(savedSitesKey, savedSites);
+          savedSitesProvider.refresh();
+        }
+      }
+    )
+  );
 }
 function deactivate() {
+}
+function getWebviewContent(url, title) {
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>${title}</title>
+      <style>
+        body, html {
+          margin: 0;
+          padding: 0;
+          height: 100%;
+          overflow: hidden;
+        }
+        iframe {
+          width: 100%;
+          height: 100vh;
+          border: none;
+        }
+      </style>
+    </head>
+    <body>
+      <iframe src="${url}" sandbox="allow-scripts allow-same-origin allow-forms" allow="autoplay; encrypted-media; fullscreen"></iframe>
+    </body>
+    </html>
+  `;
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

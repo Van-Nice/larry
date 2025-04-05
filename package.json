@@ -25,7 +25,27 @@
       },
       {
         "command": "larry.removeSavedSite",
-        "title": "Larry: Remove Saved Site"
+        "title": "Remove",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "larry.addFolder",
+        "title": "New Folder",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "larry.addSite",
+        "title": "New Site",
+        "icon": "$(add)"
+      },
+      {
+        "command": "larry.rename",
+        "title": "Rename",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "larry.openSite",
+        "title": "Open Site"
       }
     ],
     "viewsContainers": {
@@ -38,11 +58,52 @@
       ]
     },
     "views": {
-    "larry-container": [
-          {
-            "id": "savedSites",
-            "name": "Saved Sites"
-          }
+      "larry-container": [
+        {
+          "id": "savedSites",
+          "name": "Saved Sites"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "larry.addSite",
+          "when": "view == savedSites",
+          "group": "navigation"
+        },
+        {
+          "command": "larry.addFolder",
+          "when": "view == savedSites",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "larry.openSite",
+          "when": "view == savedSites && viewItem == site",
+          "group": "inline"
+        },
+        {
+          "command": "larry.rename",
+          "when": "view == savedSites",
+          "group": "1_modification"
+        },
+        {
+          "command": "larry.removeSavedSite",
+          "when": "view == savedSites",
+          "group": "1_modification"
+        },
+        {
+          "command": "larry.addSite",
+          "when": "view == savedSites && viewItem == folder",
+          "group": "2_create"
+        },
+        {
+          "command": "larry.addFolder",
+          "when": "view == savedSites && viewItem == folder",
+          "group": "2_create"
+        }
       ]
     }
   },
@@ -61,16 +122,16 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.99.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
+    "@types/vscode": "^1.99.0",
     "@typescript-eslint/eslint-plugin": "^8.28.0",
     "@typescript-eslint/parser": "^8.28.0",
-    "eslint": "^9.23.0",
-    "esbuild": "^0.25.1",
-    "npm-run-all": "^4.1.5",
-    "typescript": "^5.8.2",
     "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.4.1"
+    "@vscode/test-electron": "^2.4.1",
+    "esbuild": "^0.25.1",
+    "eslint": "^9.23.0",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.8.2"
   }
 }
