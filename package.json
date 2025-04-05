@@ -1,17 +1,21 @@
 {
   "name": "larry",
   "displayName": "Larry",
-  "description": "Surf Docs Offline in VS Code",
+  "description": "Browse Docs in VS Code",
   "version": "0.0.1",
+  "publisher": "WilsonVanNice",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/van-nice/larry.git"
+  },
+  "icon": "icons/larry-icon.png",
   "engines": {
     "vscode": "^1.99.0"
   },
   "categories": [
     "Other"
   ],
-  "activationEvents": [
-    "onView:savedSites"
-  ],
+  "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
