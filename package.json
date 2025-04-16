@@ -18,6 +18,16 @@
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "Larry",
+      "properties": {
+        "larry.webviewTimeout": {
+          "type": "number",
+          "default": 5000,
+          "description": "Timeout in milliseconds before showing the 'Open in browser' option when a site fails to load in the webview"
+        }
+      }
+    },
     "commands": [
       {
         "command": "larry.helloWorld",
@@ -50,6 +60,11 @@
       {
         "command": "larry.openSite",
         "title": "Open Site"
+      },
+      {
+        "command": "larry.openInBrowser",
+        "title": "Open in Browser",
+        "icon": "$(globe)"
       }
     ],
     "viewsContainers": {
@@ -85,6 +100,11 @@
       "view/item/context": [
         {
           "command": "larry.openSite",
+          "when": "view == savedSites && viewItem == site",
+          "group": "inline"
+        },
+        {
+          "command": "larry.openInBrowser",
           "when": "view == savedSites && viewItem == site",
           "group": "inline"
         },
