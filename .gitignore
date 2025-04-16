@@ -4,3 +4,6 @@ dist
 *.env
 vsc-extension-quickstart.md
 docs
+dist/extension.js
+dist/extension.js.map
+

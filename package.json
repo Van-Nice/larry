@@ -2,7 +2,7 @@
   "name": "larry",
   "displayName": "Larry",
   "description": "Browse Docs in VS Code",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "WilsonVanNice",
   "repository": {
     "type": "git",
@@ -19,14 +19,7 @@
   "main": "./dist/extension.js",
   "contributes": {
     "configuration": {
-      "title": "Larry",
-      "properties": {
-        "larry.webviewTimeout": {
-          "type": "number",
-          "default": 5000,
-          "description": "Timeout in milliseconds before showing the 'Open in browser' option when a site fails to load in the webview"
-        }
-      }
+      "title": "Larry"
     },
     "commands": [
       {
@@ -98,11 +91,6 @@
         }
       ],
       "view/item/context": [
-        {
-          "command": "larry.openSite",
-          "when": "view == savedSites && viewItem == site",
-          "group": "inline"
-        },
         {
           "command": "larry.openInBrowser",
           "when": "view == savedSites && viewItem == site",
